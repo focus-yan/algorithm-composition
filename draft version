@@ -1,0 +1,597 @@
+from __future__ import print_function
+import operator
+import pretty_midi as pm
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+import midi
+from pypianoroll import *
+from music21 import *
+import tensorflow as tf
+#获取路径，并保存路径到txt里
+
+def get_notes():
+    filepath = 'D:/Masterdegree/data/nottingham_single_melody/'
+    files = os.listdir(filepath)
+    Notes = []
+    for file in files:
+        try:
+            stream = converter.parse(filepath + file)
+            instru = instrument.partitionByInstrument(stream)
+            if instru:  # 如果有乐器部分，取第一个乐器部分
+                notes = instru.parts[0].recurse()
+            else:  # 如果没有乐器部分，直接取note
+                notes = stream.flat.notes
+            for element in notes:
+                # 如果是 Note 类型，取音调
+                # 如果是 Chord 类型，取音调的序号,存int类型比较容易处理
+                if isinstance(element, note.Note):
+                    Notes.append(str(element.pitch))
+                elif isinstance(element, chord.Chord):
+                    Notes.append('.'.join(str(n) for n in element.normalOrder))
+
+        except:
+            pass
+        # with open('Note', 'a+')as f:
+        #     f.write(str(Notes))
+
+    return Notes
+
+def conver_to_single_melody(midi_path):
+    midi_datas = []
+    midi_datas.append(pm.PrettyMIDI(midi_path))
+
+      # 储存所有midi文件的列表
+    notes = []
+    #用get_piano_roll方法，将乐曲旋律变为单音音高
+    for midi_data in midi_datas:
+
+        #beats = midi_data.get_downbeats()
+        #len_bar = beats[1]-beats[0]
+        #num_fs = 32 / len_bar
+        M = midi_data.get_piano_roll(32, None)
+
+        time = midi_data.get_end_time()
+        v_time = time/M.shape[1]
+
+        start_time = 0
+        end_time = 0
+
+        for a in range(M.shape[1]):
+            Vector = M[:,a]
+            start_time = end_time
+            end_time = start_time + v_time
+            for index, value in enumerate(Vector):
+                if value == 0 :
+                    continue
+                else:
+                    notes.append(pm.Note(value, index , start_time, end_time))
+
+    ht = {}
+    for n in notes:
+        if n.start not in ht: ht[n.start]  = n
+        if ht[n.start].pitch < n.pitch:
+            ht[n.start] = n
+
+    for single_melody in sorted(ht.keys()):
+        ht[single_melody]
+
+    pianoroll = np.zeros((len(ht), 128))
+    single_pitch = []
+
+    for single_note in ht.values():
+        single_pitch.append(single_note.pitch)
+
+    for index in range(0,len(ht)):
+        pianoroll[index , single_pitch[index]] = 100
+    single_melody_matrix = np.vstack(pianoroll)
+    return(single_melody_matrix)
+
+    #Track(pianoroll= pianoroll, program = 0, is_drum = False, name= 'single_melody')
+    #empty_track= Track(pianoroll = np.zeros((len(ht)+5,128)), program = 0, is_drum = False, name = 'empty_track')
+    #multitrack= Multitrack(tracks=[y_list, empty_track], tempo=120 , downbeat=[0, 96, 192, 288], beat_resolution=24)
+    #multitrack.write('D:/Masterdegree/data/nottingham_single_melody/single_melody'+str(num_midi+1)+'.mid')
+
+def get_rhythm(rhythm_dict):
+    filepath = 'D:/Masterdegree/data/mydata/training_set/'
+    files = os.listdir(filepath)
+    rhythm = []
+    for file in files:
+        filename = filepath + file
+        stream = converter.parse(filename)
+        notes = stream.flat.notes
+        for element in notes:
+            # 如果是 Note 类型，取音调
+            # 如果是 Chord 类型，取音调的序号,存int类型比较容易处理
+            if isinstance(element, note.Note):
+                rhythm.append(element.duration.quarterLength)
+    rhythm_matrix = []
+    duration = []
+    for i in rhythm:
+        duration.append(i)
+        if sum(duration) > 2:
+            duration = []
+            continue
+
+        elif sum(duration) ==2 :
+            fdq_f = 0
+            q_f = 0
+            z_f = 0
+            qq_e = 0
+            zq_e = 0
+            zh_e = 0
+            qq_s = 0
+            zq_s = 0
+            zh_s = 0
+            for j in duration:
+                if j ==2.0:
+                    rhythm_matrix.append(rhythm_dict[0])
+                    duration = []
+                elif j ==1.5:
+                    if qq_e == 1 or qq_s == 1:
+                        rhythm_matrix.append(rhythm_dict[2])
+                        duration = []
+                        fdq_f = 0
+                        q_f = 0
+                        z_f = 0
+                        qq_e = 0
+                        zq_e = 0
+                        zh_e = 0
+                        qq_s = 0
+                        zq_s = 0
+                        zh_s = 0
+                    elif j == duration[0]:
+                        fdq_f += 1
+                        rhythm_matrix.append(rhythm_dict[1])
+                        duration = []
+
+                elif j == 1:
+                    if q_f == 1 or (qq_e == 1 and zq_e == 1) or (zq_e == 1 and qq_s ==1) or (qq_e == 1 and zq_s == 1) or (qq_s == 1 and zq_s == 1):
+                        rhythm_matrix.append(rhythm_dict[5])
+                        duration = []
+                        fdq_f = 0
+                        q_f = 0
+                        z_f = 0
+                        qq_e = 0
+                        zq_e = 0
+                        zh_e = 0
+                        qq_s = 0
+                        zq_s = 0
+                        zh_s = 0
+                    elif qq_e == 1 or qq_s == 1:
+                        rhythm_matrix.append(rhythm_dict[4])
+                        z_f +=1
+                    elif j == duration[0]:
+                        rhythm_matrix.append(rhythm_dict[3])
+                        q_f += 1
+                elif j == 0.5:
+                    if fdq_f == 1 or (q_f == 1 and zh_e == 1) or (q_f ==1 and zh_s == 1) or \
+                            (qq_e == 1 and z_f == 1) or (qq_s == 1 and z_f == 1) or \
+                            (qq_e == 1 and zq_e ==1 and zh_e == 1) or (qq_e == 1 and zq_s == 1 and zh_e == 1) or\
+                            (qq_e == 1 and zq_e ==1 and zh_s ==1) or (qq_e ==1 and zh_s ==1 and zh_s ==1) or\
+                            (qq_s ==1 and zq_e ==1 and zh_e ==1) or (qq_s ==1 and zq_s ==1 and zh_e ==1) or\
+                            (qq_s ==1 and zh_s ==1 and zh_s ==1):
+                        rhythm_matrix.append(rhythm_dict[9])
+                        duration = []
+                        fdq_f = 0
+                        q_f = 0
+                        z_f = 0
+                        qq_e = 0
+                        zq_e = 0
+                        zh_e = 0
+                        qq_s = 0
+                        zq_s = 0
+                        zh_s = 0
+                    elif q_f ==1 or (qq_e == 1 and zq_e ==1) or (qq_e ==1 and zq_s ==1) or (qq_e ==1 and zq_s ==1) or\
+                            (qq_s ==1 and zq_e ==1) or (qq_s == 1 and zq_s ==1):
+                        rhythm_matrix.append(rhythm_dict[8])
+                        zh_e +=1
+                    elif qq_e ==1 or qq_s ==1:
+                        rhythm_matrix.append(rhythm_dict[7])
+                        zq_e += 1
+                    elif j == duration[0]:
+                        rhythm_matrix.append(rhythm_dict[6])
+                        qq_e += 1
+                elif j == 0.25:
+                    if fdq_f == 1 or (q_f == 1 and zh_e == 1) or (q_f ==1 and zh_s == 1) or \
+                            (qq_e == 1 and z_f == 1) or (qq_s == 1 and z_f == 1) or \
+                            (qq_e == 1 and zq_e ==1 and zh_e == 1) or (qq_e == 1 and zq_s == 1 and zh_e == 1) or\
+                            (qq_e == 1 and zq_e ==1 and zh_s ==1) or (qq_e ==1 and zh_s ==1 and zh_s ==1) or\
+                            (qq_s ==1 and zq_e ==1 and zh_e ==1) or (qq_s ==1 and zq_s ==1 and zh_e ==1) or\
+                            (qq_s ==1 and zh_s ==1 and zh_s ==1):
+                        rhythm_matrix.append(rhythm_dict[13])
+                        duration = []
+                        fdq_f = 0
+                        q_f = 0
+                        z_f = 0
+                        qq_e = 0
+                        zq_e = 0
+                        zh_e = 0
+                        qq_s = 0
+                        zq_s = 0
+                        zh_s = 0
+                    elif q_f ==1 or (qq_e == 1 and zq_e ==1) or (qq_e ==1 and zq_s ==1) or (qq_e ==1 and zq_s ==1) or\
+                            (qq_s ==1 and zq_e ==1) or (qq_s == 1 and zq_s ==1):
+                        rhythm_matrix.append(rhythm_dict[12])
+                        zh_s +=1
+                    elif qq_e ==1 or qq_s ==1:
+                        rhythm_matrix.append(rhythm_dict[11])
+                        zq_s += 1
+                    elif j == duration[0]:
+                        rhythm_matrix.append(rhythm_dict[10])
+                        qq_s += 1
+    return rhythm_matrix
+
+def embedding_matrix():
+    embedding_matrix = np.zeros([34,14])
+    embedding_matrix[0,0] = 1
+    embedding_matrix[1,1] = 1
+    embedding_matrix[1,9] = 1
+    embedding_matrix[2,1] = 1
+    embedding_matrix[2,13] = 1
+    embedding_matrix[3,2] = 1
+    embedding_matrix[3,6] = 1
+    embedding_matrix[4,4] = 1
+    embedding_matrix[4,10] = 1
+    embedding_matrix[5,3] = 1
+    embedding_matrix[5,5] =1
+    embedding_matrix[6,3] = 1
+    embedding_matrix[6,8] = 1
+    embedding_matrix[6,9] = 1
+    embedding_matrix[7,3] = 1
+    embedding_matrix[7,8] = 1
+    embedding_matrix[7,13] = 1
+    embedding_matrix[8,3] = 1
+    embedding_matrix[8,9] = 1
+    embedding_matrix[8,12] = 1
+    embedding_matrix[9,3] = 1
+    embedding_matrix[9,12] = 1
+    embedding_matrix[9,13] = 1
+    embedding_matrix[10,5] = 1
+    embedding_matrix[10,6] = 1
+    embedding_matrix[10,7] = 1
+    embedding_matrix[11,5] = 1
+    embedding_matrix[11,7] = 1
+    embedding_matrix[11,10] = 1
+    embedding_matrix[12,5] = 1
+    embedding_matrix[12,6] = 1
+    embedding_matrix[12,11] = 1
+    embedding_matrix[13,5] = 1
+    embedding_matrix[13,10] = 1
+    embedding_matrix[13,11] = 1
+    embedding_matrix[14,4] = 1
+    embedding_matrix[14,6] = 1
+    embedding_matrix[14,9] = 1
+    embedding_matrix[15,4] =1
+    embedding_matrix[15,6] =1
+    embedding_matrix[15,13] =1
+    embedding_matrix[16,4] = 1
+    embedding_matrix[16,9] = 1
+    embedding_matrix[16,10] = 1
+    embedding_matrix[17,4] =1
+    embedding_matrix[17,10] = 1
+    embedding_matrix[17,13] = 1
+    embedding_matrix[18,6] = 1
+    embedding_matrix[18,7] =1
+    embedding_matrix[18,8] =1
+    embedding_matrix[18,9] =1
+    embedding_matrix[19,6] =1
+    embedding_matrix[19,8] =1
+    embedding_matrix[19,9] =1
+    embedding_matrix[19,11] = 1
+    embedding_matrix[20,6] = 1
+    embedding_matrix[20,7] =1
+    embedding_matrix[20,9] =1
+    embedding_matrix[20,12] =1
+    embedding_matrix[21,6] =1
+    embedding_matrix[21,7] =1
+    embedding_matrix[21,8] =1
+    embedding_matrix[21,13] =1
+    embedding_matrix[22,6] =1
+    embedding_matrix[22,7] =1
+    embedding_matrix[22,12] =1
+    embedding_matrix[22,13] =1
+    embedding_matrix[23,6] =1
+    embedding_matrix[23,8] =1
+    embedding_matrix[23,11] =1
+    embedding_matrix[23,13] =1
+    embedding_matrix[24,6] =1
+    embedding_matrix[24,9] =1
+    embedding_matrix[24,11] =1
+    embedding_matrix[24,12] =1
+    embedding_matrix[25,6] =1
+    embedding_matrix[25,11] =1
+    embedding_matrix[25,12] =1
+    embedding_matrix[25,13] =1
+    embedding_matrix[26,7] =1
+    embedding_matrix[26,8] =1
+    embedding_matrix[26,9] =1
+    embedding_matrix[26,10] =1
+    embedding_matrix[27,7] =1
+    embedding_matrix[27,10] =1
+    embedding_matrix[27,12] =1
+    embedding_matrix[27,13] =1
+    embedding_matrix[28,7] =1
+    embedding_matrix[28,8] =1
+    embedding_matrix[28,10] =1
+    embedding_matrix[28,13] =1
+    embedding_matrix[29,7] =1
+    embedding_matrix[29,10] =1
+    embedding_matrix[29,12] =1
+    embedding_matrix[29,13] =1
+    embedding_matrix[30,8] =1
+    embedding_matrix[30,9] =1
+    embedding_matrix[30,10] =1
+    embedding_matrix[30,11] =1
+    embedding_matrix[31,8] =1
+    embedding_matrix[31,10] =1
+    embedding_matrix[31,11] =1
+    embedding_matrix[31,13] =1
+    embedding_matrix[32,9] =1
+    embedding_matrix[32,10] =1
+    embedding_matrix[32,11] =1
+    embedding_matrix[32,12] =1
+    embedding_matrix[33,10] =1
+    embedding_matrix[33,11] =1
+    embedding_matrix[33,12] =1
+    embedding_matrix[33,13] =1
+    return embedding_matrix
+
+
+def Traversal(path):
+    if os.path.isdir(path):
+        subs = os.listdir(path)
+        for sub in subs:
+            subdir = path + '/' + sub
+            Traversal(subdir)
+    elif os.path.isfile(path):
+        f.write(path+'/n')
+        return
+
+# 构建神经网络模型
+def get_model(inputs, notes_len, weights_file=None):
+    model = tf.keras.models.Sequential()
+    model.add(tf.keras.layers.LSTM(256, input_shape=(inputs.shape[1], inputs.shape[2]),
+                                   return_sequences=True))  # 512层神经元，return_sequences=True表示返回所有的输出序列
+    model.add(tf.keras.layers.Dropout(0.3))  # 丢弃 30% 神经元，防止过拟合
+    model.add(tf.keras.layers.LSTM(256, return_sequences=True))
+    model.add(tf.keras.layers.Dropout(0.3))
+    model.add(tf.keras.layers.LSTM(256))  # return_sequences 是默认的 False，只返回输出序列的最后一个[
+    model.add(tf.keras.layers.Dense(128))  # 256 个神经元的全连接层
+    model.add(tf.keras.layers.Dropout(0.3))
+    model.add(tf.keras.layers.Dense(notes_len))  # 输出的数目等于所有不重复的音调的数目
+    model.add(tf.keras.layers.Activation('softmax'))
+    model.compile(loss='categorical_crossentropy', optimizer='rmsprop')
+
+    if weights_file is not None:
+        model.load_weights(weights_file)
+
+    return model
+
+
+# 训练模型
+def train_rhythm():
+    rhythm_dict = {}
+    for i in range(0, 14):
+        a = np.zeros([14, 1])
+        a[i] = 1
+        rhythm_dict[i] = a
+    rhythm_matrix = get_rhythm(rhythm_dict)
+    rhythm_matrix_reshape = np.reshape(rhythm_matrix,(len(rhythm_matrix),14))
+    rhythm_matrix_T = rhythm_matrix_reshape.T
+    embedding = embedding_matrix()
+    E = np.dot(embedding,rhythm_matrix_T)
+
+
+    steps = 2
+    network_input = []
+    network_output = []
+    for i in range(0, int(np.size(E,1)) - steps):
+        # 输入3个，输出1个，隔3个
+        if i+steps <= int(np.size(E,1)):
+            sequence_in = E[:,i: i + steps]
+            sequence_out = E[:,i + steps]
+            network_input.append(sequence_in)
+            network_output.append(sequence_out)
+        elif i+steps >int(np.size(E,1)):
+            break
+    print(np.shape(network_output))
+    network_input_reshape = np.reshape(network_input, (int(np.size(network_input,0)), steps, np.size(embedding,0)))
+    normal_network_input = network_input_reshape / float(np.size(embedding,0))  # 归一化
+    network_output = tf.keras.utils.to_categorical(network_output, num_classes = 2)  # 输出布尔矩阵，配合categorical_crossentropy 算法使用
+    model = get_model(normal_network_input, np.size(embedding,0))
+    filepath = "weights-{epoch:02d}-{loss:.2f}.hdf5"
+    checkpoint = tf.keras.callbacks.ModelCheckpoint(
+        filepath,
+        monitor='loss',  # 监控的对象是loss
+        verbose=0,
+        save_best_only=True,
+        mode='min'  # 如果监控对象是val_acc则取max，是loss则取min
+    )
+    callbacks_list = [checkpoint]
+    print(np.shape(normal_network_input))
+    print(np.shape(network_output))
+    model.fit(normal_network_input, network_output, epochs=200, batch_size=32,
+              callbacks=callbacks_list)  # 整体迭代100次，每小批128个
+
+    return network_input, normal_network_input, len(rhythm_dict), rhythm_dict.keys()
+
+# 生成节奏
+def generate_rhythm(model, network_input,note_name, notes_len):
+    randindex = np.random.randint(0, len(network_input) - 1)
+    print(np.shape(network_input))
+    print(len(network_input))
+    print(randindex)
+    notedic = dict((i, j) for i, j in enumerate(note_name))  # 把刚才的整数还原成音调
+    pattern = list(network_input[randindex])  # 长度为100
+    predictions = []
+    # 随机生成1000个音符
+    for note_index in range(64):
+        # pattern = list(network_input[np.random.randint(0,500)])
+        prediction_input = np.reshape(pattern, (1, len(pattern), 1))
+        prediction_input = prediction_input / float(notes_len)  # 归一化
+        prediction = model.predict(prediction_input, verbose=0)  # verbose = 0 为不在标准输出流输出日志信息
+        index = np.argmax(prediction)
+        # print(index)
+        result = notedic[index]
+        predictions.append(result)
+        # 往后移动
+    return predictions
+
+
+# 生成mid音乐节奏
+def create_rhythm():
+    key = 0
+    rhythm_dict = {}
+    r = get_rhythm()
+    for i in range(int(len(r) / 32)):  # 设计一个字典，把节奏型转换成数字，方便训练
+        if r[i * 32:(i + 1) * 32] not in rhythm_dict.values():
+            rhythm_dict[key] = r[i * 32:(i + 1) * 32]
+            key += 1
+    print(len(rhythm_dict))
+    print(rhythm_dict)
+    lable = []  # 总节奏型
+    network_input = []  # 创建输入序列
+    network_output = []  # 创建输出序列
+    sequence_length = 32  # 序列长度
+    steps = 2
+    for j in range(0, len(r) - sequence_length + 1, sequence_length):
+        network_sequence = r[j:j + sequence_length]
+        for key, value in rhythm_dict.items():
+            if value == network_sequence:
+                lable.append(key)
+    for i in range(0, len(lable) - steps, steps):
+        # 输入4个，输出1个，隔4个
+        sequence_in = lable[i: i + steps + 1]
+        sequence_out = lable[i + steps + 1]
+        network_input.append(sequence_in)
+        network_output.append(sequence_out)
+    network_input_reshape = np.reshape(network_input, (int(len(network_input)), steps + 1, 1))
+    normal_network_input = network_input_reshape / float(len(rhythm_dict))  # 归一化
+    # print(len(network_input)) #1541019
+    # network_input, normal_network_input,notes_len,note_name=train()
+    # 寻找loss最小的weight文件，作为训练参数
+    files = os.listdir()
+    minloss = {}
+    for i in files:
+        if 'weights' in i:
+            num = i[11:15]
+            minloss[num] = i
+    best_weights = minloss[min(minloss.keys())]
+    print('最佳模型文件为:' + best_weights)
+    model = get_model(normal_network_input, len(rhythm_dict), best_weights)
+    predictions = generate_rhythm(model, network_input_reshape, rhythm_dict, len(rhythm_dict))
+    print(rhythm_dict)
+    output_rhythm = []
+    offset = 0
+    # 生成 Note（音符）或 Chord（和弦）对象
+    for data in predictions:
+        new_note = note.Note(data)
+        new_note.offset = offset
+        new_note.storedInstrument = instrument.Piano()
+        output_rhythm.append(new_note)
+        offset += 1
+    # 创建音乐流（Stream）
+    midi_stream = stream.Stream(output_notes)
+    # 写入 MIDI 文件
+    midi_stream.write('midi', fp='output1.mid')
+
+###—main body—————————————————————————————————————
+
+txt = 'D:/Masterdegree/Mytest/training_path.txt'
+if os.path.exists(txt):
+    os.remove(txt)
+f = open(txt, 'w')
+
+Traversal('D:/Masterdegree/data/mydata/training_set')
+
+result = []
+
+
+f = open('D:/Masterdegree/Mytest/training_path.txt', 'r')
+for line in f.readlines():
+    name = line.split('/n')
+    result.append(name)  # 所有路径列表
+
+midi_pathes = []  # 存储midi文件路径的列表
+
+    #提取路径列表中的单个路径并用PrettyMIDI方法，将midi文件提取出来，添加到midi_datas列表中
+for pathes in result:
+    for path in pathes:
+        if len(path) == 0:
+            continue
+        else:
+            midi_pathes.append(path)
+
+for num_midi in range(0,6 ):
+    y_list = conver_to_single_melody(midi_pathes[num_midi])
+    train_rhythm()
+    create_rhythm()
+
+
+
+txt = 'D:/Masterdegree/Mytest/testing_path.txt'
+if os.path.exists(txt):
+    os.remove(txt)
+f = open(txt, 'w')
+
+Traversal('D:/Masterdegree/data/mydata/testing_set')
+
+result = []
+
+
+f = open('D:/Masterdegree/Mytest/testing_path.txt', 'r')
+for line in f.readlines():
+    name = line.split('/n')
+    result.append(name)  # 所有路径列表
+
+midi_pathes = []  # 存储midi文件路径的列表
+
+    #提取路径列表中的单个路径并用PrettyMIDI方法，将midi文件提取出来，添加到midi_datas列表中
+for pathes in result:
+    for path in pathes:
+        if len(path) == 0:
+            continue
+        else:
+            midi_pathes.append(path)
+
+for num_midi in range(0,2):
+    y_list = conver_to_single_melody(midi_pathes[num_midi])
+    y_m = []
+    y_r = []
+    i = 0
+    for m in y_list:
+        i += 1
+        if i == 1:
+            ml = list(m)
+            a = ml.index(100)
+            y_m.append(a)
+        else:
+            ml = list(m)
+            a = ml.index(100)
+            if y_m[-1] == a:
+                continue
+            else:
+                y_m.append(a)
+    i = 0
+    j = 0
+    r_prev = int()
+    for r in y_list:
+        i += 1
+        rl = list(r)
+        b = rl.index(100)
+        if i ==1:
+            r_prev = b
+        else:
+            if r_prev == b:
+                j += 1
+                r_prev = b
+            else:
+                for count in range(0, j+1):
+                    y_r.append(j+1)
+                r_prev = b
+                j = 0
+    print(y_r[0:64])
+    create_rhythm(y_r[0:64])
+
+
